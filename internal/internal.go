@@ -275,6 +275,7 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 
 func (s *Sbs) initDataDir() error {
 	// Delete and Recreate Repopath Directory
+	fmt.Printf("Deleting directories under %v...\n", s.repoPath)
 	if err := s.removeDirByStorage(s.repoPath); err != nil {
 		return fmt.Errorf("failed to remove repository directory: %v", err)
 	}
@@ -730,7 +731,7 @@ func (s *Sbs) loadPreviousSnapshot(snapshotFile string) (map[string]BackupRecord
 }
 
 func (s *Sbs) isFileModified(prev, curr BackupRecord) bool {
-	return prev.Size != curr.Size || prev.ModTime != curr.ModTime
+	return prev.Type == "R" && (prev.Size != curr.Size || prev.ModTime != curr.ModTime)
 }
 
 func (s *Sbs) handleModifiedFile(srcDir, dstRootDir string, record BackupRecord) error {
