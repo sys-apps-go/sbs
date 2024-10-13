@@ -6,8 +6,10 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/sys-apps-go/sbs/internal"
 	"github.com/urfave/cli/v2"
@@ -284,7 +286,16 @@ func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) err
 		if r := recover(); r != nil {
 			fmt.Printf("Recovered from panic: %v\n", r)
 			s.Cleanup()
+			fmt.Println(string(debug.Stack()))
+
 		}
+		pid := os.Getpid() // Get the current process ID
+		fmt.Printf("Waiting for debugger to attach (PID: %d)...\n", pid)
+
+		for {
+			time.Sleep(time.Second) // Wait for 1 second in each iteration
+		}
+
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
