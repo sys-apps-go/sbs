@@ -1397,14 +1397,29 @@ func findBackupVersions(dataDir string) (int, int, error) {
 	return prevVer, newVer, nil
 }
 
-func (s *Sbs) Cleanup() {
+func (s *Sbs) Cleanup() error {
 	switch s.currentStatus {
+	case statusInit:
+		fmt.Printf("Deleting files/directories under %v...\n", s.repoPath)
+		if err := s.removeDirByStorage(s.repoPath); err != nil {
+			return fmt.Errorf("failed to remove repository directory: %v", err)
+		}
 	case statusBackup:
-		os.RemoveAll(s.currBackupDstDir)
+		if s.storageType == "minio" && !strings.HasSuffix(s.currBackupDstDir, "/") {
+			s.currBackupDstDir += "/"
+		}
+
+		fmt.Printf("Deleting files/directories under %v...\n", s.currBackupDstDir)
+
+		if err := s.removeDirByStorage(s.currBackupDstDir); err != nil {
+			return fmt.Errorf("failed to remove backup version directory: %v %v", s.currBackupDstDir, err)
+		}
+		fmt.Printf("\nPlease remove backup version directory manually if not already removed: %v\n", s.currBackupDstDir)
 	case statusRestore:
 		os.RemoveAll(s.currRestoreDstDir)
 	case statusListBackup:
 	}
+	return nil
 }
 
 func isHidden(path string) bool {

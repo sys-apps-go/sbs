@@ -318,7 +318,8 @@ func setupSignalHandler(cancel context.CancelFunc, s *internal.Sbs) {
 	go func() {
 		<-sigChan
 		log.Println("Received interrupt signal. Cancelling operations...")
-		s.AbortFlag = true
+		s.Cleanup()
 		cancel()
+		os.Exit(1)
 	}()
 }
