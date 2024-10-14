@@ -8,9 +8,9 @@ import (
 	"os/signal"
 	"runtime/debug"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
-	"sync/atomic"
 
 	"github.com/sys-apps-go/sbs/internal"
 	"github.com/urfave/cli/v2"
@@ -290,7 +290,7 @@ func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) err
 			fmt.Println(string(debug.Stack()))
 			pid := os.Getpid() // Get the current process ID
 			fmt.Printf("Waiting for debugger to attach (PID: %d)...\n", pid)
-	
+
 			for {
 				time.Sleep(time.Second) // Wait for 1 second in each iteration
 			}
@@ -314,24 +314,24 @@ func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) err
 }
 
 func setupSignalHandler(cancel context.CancelFunc, s *internal.Sbs) {
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-    go func() {
-        <-sigChan
-        log.Println("Received interrupt signal. Cancelling operations...")
+	go func() {
+		<-sigChan
+		log.Println("Received interrupt signal. Cancelling operations...")
 
-        // Atomically set TaskAborted to true
-        atomic.StoreUint32(&s.TaskAborted, 1)
+		// Atomically set TaskAborted to true
+		atomic.StoreUint32(&s.TaskAborted, 1)
 
-        for {
-            if atomic.LoadUint32(&s.TaskExited) == 1 {
-                break
-            }
-            time.Sleep(time.Second)
-        }
+		for {
+			if atomic.LoadUint32(&s.TaskExited) == 1 {
+				break
+			}
+			time.Sleep(time.Second)
+		}
 
-        s.Cleanup()
-        os.Exit(1)
-    }()
+		s.Cleanup()
+		os.Exit(1)
+	}()
 }
