@@ -229,6 +229,10 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 				return err
 			}
 			s.minioClient = minioClient
+			err = s.verifyAndCreateBucket(bucketName, region)
+			if err != nil {
+				return err
+			}
 			return nil
 		}
 	case "aws-s3":
@@ -731,7 +735,7 @@ func (s *Sbs) loadPreviousSnapshot(snapshotFile string) (map[string]BackupRecord
 }
 
 func (s *Sbs) isFileModified(prev, curr BackupRecord) bool {
-	return prev.Type == "R" && (prev.Size != curr.Size || prev.ModTime != curr.ModTime)
+	return prev.Type == "F" && (prev.Size != curr.Size || prev.ModTime != curr.ModTime)
 }
 
 func (s *Sbs) handleModifiedFile(srcDir, dstRootDir string, record BackupRecord) error {
@@ -2265,6 +2269,22 @@ func (s *Sbs) createFileS3(bucket, key string, content []byte) error {
 	})
 	if err != nil {
 		return fmt.Errorf("failed to upload file to S3: %v", err)
+	}
+	return nil
+}
+
+func (s *Sbs) verifyAndCreateBucket(bucket, region string) error {
+	found, err := s.minioClient.BucketExists(context.Background(), bucket)
+	if err != nil {
+		return err
+	}
+	if found {
+		return nil
+	} else {
+		err = s.minioClient.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{Region: region, ObjectLocking: true})
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

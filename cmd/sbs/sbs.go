@@ -287,15 +287,13 @@ func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) err
 			fmt.Printf("Recovered from panic: %v\n", r)
 			s.Cleanup()
 			fmt.Println(string(debug.Stack()))
-
+			pid := os.Getpid() // Get the current process ID
+			fmt.Printf("Waiting for debugger to attach (PID: %d)...\n", pid)
+	
+			for {
+				time.Sleep(time.Second) // Wait for 1 second in each iteration
+			}
 		}
-		pid := os.Getpid() // Get the current process ID
-		fmt.Printf("Waiting for debugger to attach (PID: %d)...\n", pid)
-
-		for {
-			time.Sleep(time.Second) // Wait for 1 second in each iteration
-		}
-
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
