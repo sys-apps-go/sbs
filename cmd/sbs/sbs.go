@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"sync/atomic"
 
 	"github.com/sys-apps-go/sbs/internal"
 	"github.com/urfave/cli/v2"
@@ -313,13 +314,24 @@ func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) err
 }
 
 func setupSignalHandler(cancel context.CancelFunc, s *internal.Sbs) {
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigChan
-		log.Println("Received interrupt signal. Cancelling operations...")
-		s.Cleanup()
-		cancel()
-		os.Exit(1)
-	}()
+    sigChan := make(chan os.Signal, 1)
+    signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+    go func() {
+        <-sigChan
+        log.Println("Received interrupt signal. Cancelling operations...")
+
+        // Atomically set TaskAborted to true
+        atomic.StoreUint32(&s.TaskAborted, 1)
+
+        for {
+            if atomic.LoadUint32(&s.TaskExited) == 1 {
+                break
+            }
+            time.Sleep(time.Second)
+        }
+
+        s.Cleanup()
+        os.Exit(1)
+    }()
 }

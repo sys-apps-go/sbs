@@ -18,6 +18,7 @@ import (
 	"io/fs"
 	"io/ioutil"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -107,7 +108,6 @@ type Sbs struct {
 	backupFileCount     int
 	restoreFileCount    int
 	totalSize           int64
-	AbortFlag           bool
 	fileMu              sync.Mutex
 	totalFiles          int64
 	completedFiles      int64
@@ -115,6 +115,8 @@ type Sbs struct {
 	isEncrypted         bool
 	isVerboseOutput     bool
 	isCompressed        bool
+	TaskAborted         uint32
+	TaskExited          uint32
 	backupRecords       []BackupRecord
 	minioClient         *minio.Client
 	blockHashMap        map[string]string
@@ -582,6 +584,12 @@ func (s *Sbs) collectBackupJobs(srcDir, backupPath string, backupHiddenFiles boo
 			s.fileCount++
 			jobChannel <- job{srcPath: path, dstPath: dstPath, relPath: relPath, fileInfo: info}
 		}
+		if atomic.LoadUint32(&s.TaskAborted) == 1 {
+			fmt.Println("Aborting Backup Operations...")
+			s.Cleanup()
+			atomic.StoreUint32(&s.TaskExited, 1)
+			os.Exit(1)
+		}
 		return nil
 	})
 
@@ -860,13 +868,6 @@ func (s *Sbs) processAndStoreFile(srcPath, dstPath, relPath string, info os.File
 			fmt.Printf(".")
 		}
 	}
-
-	if s.AbortFlag {
-		fmt.Printf("Aborting %v\n", s.currentStatus)
-		s.removeDirByStorage(s.currBackupDstDir)
-		os.Exit(1)
-	}
-
 	return nil
 }
 
@@ -1034,10 +1035,10 @@ func (s *Sbs) restoreFiles(records []BackupRecord, rootDir, dataOptimization str
 			}
 		}(record)
 
-		if s.AbortFlag {
-			fmt.Printf("Aborting %v\n", s.currentStatus)
-			os.RemoveAll(rootDir)
-			os.Exit(1)
+		if atomic.LoadUint32(&s.TaskAborted) == 1 {
+			fmt.Println("Aborting Restore Operations...")
+			s.Cleanup()
+			atomic.StoreUint32(&s.TaskExited, 1)
 		}
 	}
 
@@ -1131,11 +1132,6 @@ func (s *Sbs) listBackupRecords() error {
 	for _, record := range records {
 		fmt.Printf("Backup Dir: %v, Version: %v, Backup ID: %v, Timestamp: %v\n",
 			record.SourceDirName, record.Version, record.SnapshotID, record.BackupTime)
-
-		if s.AbortFlag {
-			fmt.Printf("Aborting %v\n", s.currentStatus)
-			os.Exit(1)
-		}
 	}
 	return nil
 }
@@ -1146,8 +1142,9 @@ func (s *Sbs) readPassword(prompt string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if s.AbortFlag {
+	if atomic.LoadUint32(&s.TaskAborted) == 1 {
 		fmt.Printf("Aborting %v\n", s.currentStatus)
+		s.Cleanup()
 		os.Exit(1)
 	}
 	fmt.Println() // Print a newline after the password input
@@ -1407,6 +1404,7 @@ func (s *Sbs) Cleanup() error {
 	case statusBackup:
 		if s.storageType == "minio" && !strings.HasSuffix(s.currBackupDstDir, "/") {
 			s.currBackupDstDir += "/"
+			removeDirectoryWithMC(s.currBackupDstDir)
 		}
 
 		fmt.Printf("Deleting files/directories under %v...\n", s.currBackupDstDir)
@@ -1420,6 +1418,11 @@ func (s *Sbs) Cleanup() error {
 	case statusListBackup:
 	}
 	return nil
+}
+
+func removeDirectoryWithMC(dirPath string) {
+	cmd := exec.Command("mc", "rm", "--recursive", "--force", dirPath)
+	cmd.CombinedOutput()
 }
 
 func isHidden(path string) bool {
