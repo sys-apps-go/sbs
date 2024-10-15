@@ -1412,7 +1412,10 @@ func (s *Sbs) Cleanup() error {
 		if err := s.removeDirByStorage(s.currBackupDstDir); err != nil {
 			return fmt.Errorf("failed to remove backup version directory: %v %v", s.currBackupDstDir, err)
 		}
-		fmt.Printf("\nPlease remove backup version directory manually if not already removed: %v\n", s.currBackupDstDir)
+		isDir, _, err := s.isDirExistsByStorage(s.currBackupDstDir)
+		if err == nil && isDir {
+			fmt.Printf("\nPlease remove backup version directory manually if not already removed: %v\n", s.currBackupDstDir)
+		}
 	case statusRestore:
 		os.RemoveAll(s.currRestoreDstDir)
 	case statusListBackup:
