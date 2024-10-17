@@ -2060,6 +2060,8 @@ func (s *Sbs) findBackupVersionsS3(dataDir string) (int, int, error) {
 	input := &s3.ListObjectsV2Input{
 		Bucket: aws.String(s.bucketName),
 		Prefix: aws.String(objectName),
+		Delimiter: aws.String("/"),
+		MaxKeys: aws.Int64(1024),	
 	}
 
 	// List objects
@@ -2097,7 +2099,6 @@ func (s *Sbs) findBackupVersionsS3(dataDir string) (int, int, error) {
 
 	return prevVer, newVer, nil
 }
-
 func (s *Sbs) walkMinio(bucketName, srcDir string, walkFn func(path string, info ExtendedObjectInfo, err error) error) error {
 	ctx := context.Background()
 	objectCh := s.minioClient.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
