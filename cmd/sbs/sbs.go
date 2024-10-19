@@ -43,26 +43,26 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3",
+						Usage:   "Storage type: local/remote/minio/s3/lts",
 					},
 					&cli.StringFlag{
-						Name:  "minio-endpoint",
-						Value: "http://localhost:50051",
+						Name:  "endpoint",
+						Value: "http://localhost:9000",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
-						Name:  "aws-region",
+						Name:  "region",
 						Value: "us-east-1",
 						Usage: "AWS Region",
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -109,7 +109,7 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3",
+						Usage:   "Storage type: local/remote/minio/s3/lts",
 					},
 					&cli.BoolFlag{
 						Name:    "v",
@@ -117,23 +117,23 @@ func main() {
 						Usage:   "Print detailed output",
 					},
 					&cli.StringFlag{
-						Name:  "minio-endpoint",
-						Value: "http://localhost:50051",
+						Name:  "endpoint",
+						Value: "http://localhost:9000",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
-						Name:  "aws-region",
+						Name:  "region",
 						Value: "us-east-1",
 						Usage: "AWS Region",
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -171,7 +171,7 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3",
+						Usage:   "Storage type: local/remote/minio/s3/lts",
 					},
 					&cli.BoolFlag{
 						Name:    "v",
@@ -179,23 +179,23 @@ func main() {
 						Usage:   "Print detailed output",
 					},
 					&cli.StringFlag{
-						Name:  "minio-endpoint",
-						Value: "http://localhost:50051",
+						Name:  "endpoint",
+						Value: "http://localhost:9000",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
-						Name:  "aws-region",
+						Name:  "region",
 						Value: "us-east-1",
 						Usage: "AWS Region",
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -215,26 +215,26 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3",
+						Usage:   "Storage type: local/remote/minio/s3/lts",
 					},
 					&cli.StringFlag{
-						Name:  "minio-endpoint",
-						Value: "http://localhost:50051",
+						Name:  "endpoint",
+						Value: "http://localhost:9000",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
-						Name:  "aws-region",
+						Name:  "region",
 						Value: "us-east-1",
 						Usage: "AWS Region",
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "objstoreadmin",
+						Value: "minioadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -275,8 +275,8 @@ func runListBackup(c *cli.Context) error {
 func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) error) error {
 	repoPath := c.String("r")
 	storageType := c.String("t")
-	minioEndpoint := c.String("minio-endpoint")
-	awsRegion := c.String("aws-region")
+	minioEndpoint := c.String("endpoint")
+	awsRegion := c.String("region")
 	accessKeyID := c.String("access-key-id")
 	secretAccessKey := c.String("secret-access-key")
 

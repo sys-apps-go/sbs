@@ -1959,7 +1959,25 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 		return true, fileInfo, nil
 
 	case "remote":
-		return false, nil, fmt.Errorf("remote file system is not implemented")
+		// Check if the backup directory exists in LTS
+		prefix := s.getPathBaseS3(path, true) // Use the prefix to check the directory
+		input := &s3.ListObjectsV2Input{
+			Bucket:  aws.String(s.bucketName),
+			Prefix:  aws.String(prefix),
+			MaxKeys: aws.Int64(1), // Limit to 1 object to check for existence
+		}
+
+		result, err := s.s3Client.ListObjectsV2(input)
+		if err != nil {
+			return false, nil, fmt.Errorf("error listing objects in S3: %v", err)
+		}
+
+		if len(result.CommonPrefixes) > 0 {
+			// If we found at least one object with the given prefix, the directory exists
+			return true, nil, nil
+		}
+
+		return false, nil, fmt.Errorf("AWS S3 directory does not exist: %v", path)
 
 	case "minio":
 		objectName := s.getPathBase(path, true)
@@ -1995,7 +2013,7 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 			return false, nil, fmt.Errorf("error listing objects in S3: %v", err)
 		}
 
-		if len(result.Contents) > 0 {
+		if len(*result.Prefix) > 0 {
 			// If we found at least one object with the given prefix, the directory exists
 			return true, nil, nil
 		}
@@ -2012,7 +2030,7 @@ func (s *Sbs) findBackupVersionsByStorage(dataDir string) (int, int, error) {
 	case "local":
 		return findBackupVersions(dataDir)
 	case "remote":
-		return 0, 0, fmt.Errorf("remote file system is not implemented")
+		return s.findBackupVersionsLTS(dataDir)
 	case "minio":
 		return s.findBackupVersionsMinio(dataDir)
 	case "aws-s3":
@@ -2033,7 +2051,6 @@ func (s *Sbs) findBackupVersionsMinio(dataDir string) (int, int, error) {
 		if object.Err != nil {
 			return 0, 0, fmt.Errorf("error listing objects in MinIO: %v", object.Err)
 		}
-
 		objectName = strings.TrimPrefix(object.Key, dataDir)
 		if strings.Contains(objectName, "V") {
 			versions = append(versions, objectName)
@@ -2071,11 +2088,13 @@ func (s *Sbs) findBackupVersionsS3(dataDir string) (int, int, error) {
 	}
 
 	var versions []int
-	for _, obj := range result.Contents {
+	for _, obj := range result.CommonPrefixes {
 		// Get the object key
-		versionName := *obj.Key
+		versionName := *obj.Prefix
+		if strings.HasSuffix(versionName, "/") {
+			versionName = versionName[0:len(versionName)-1]
+		}
 		versionName = filepath.Base(versionName)
-
 		// Check if the object key starts with "V" followed by a number
 		if strings.HasPrefix(versionName, "V") {
 			versionPart := strings.TrimPrefix(versionName, "V") // Remove "V" prefix
@@ -2099,6 +2118,58 @@ func (s *Sbs) findBackupVersionsS3(dataDir string) (int, int, error) {
 
 	return prevVer, newVer, nil
 }
+
+func (s *Sbs) findBackupVersionsLTS(dataDir string) (int, int, error) {
+	// Create S3 service client
+	svc := s.s3Client
+
+	// Prepare to list objects in the bucket
+	objectName := s.getPathBaseS3(dataDir, true)
+	input := &s3.ListObjectsV2Input{
+		Bucket: aws.String(s.bucketName),
+		Prefix: aws.String(objectName),
+		Delimiter: aws.String("/"),
+		MaxKeys: aws.Int64(1024),	
+	}
+
+	// List objects
+	result, err := svc.ListObjectsV2(input)
+	if err != nil {
+		return 0, 0, fmt.Errorf("error listing objects in S3: %v", err)
+	}
+
+	var versions []int
+	for _, obj := range result.CommonPrefixes {
+		// Get the object key
+		versionName := *obj.Prefix
+		if strings.HasSuffix(versionName, "/") {
+			versionName = versionName[0:len(versionName)-1]
+		}
+		versionName = filepath.Base(versionName)
+		// Check if the object key starts with "V" followed by a number
+		if strings.HasPrefix(versionName, "V") {
+			versionPart := strings.TrimPrefix(versionName, "V") // Remove "V" prefix
+			versionNumber, err := strconv.Atoi(versionPart)     // Convert to integer
+			if err == nil {
+				versions = append(versions, versionNumber)
+			}
+		}
+	}
+
+	// Sort the versions in ascending order
+	sort.Ints(versions)
+
+	if len(versions) == 0 {
+		return 0, 0, nil // No versions found
+	}
+
+	// Get the previous version and the new version
+	prevVer := versions[len(versions)-1] // Last version in the sorted list
+	newVer := prevVer + 1                // Next version number
+
+	return prevVer, newVer, nil
+}
+
 func (s *Sbs) walkMinio(bucketName, srcDir string, walkFn func(path string, info ExtendedObjectInfo, err error) error) error {
 	ctx := context.Background()
 	objectCh := s.minioClient.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
