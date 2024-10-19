@@ -47,7 +47,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "minio-endpoint",
-						Value: "http://localhost:9000",
+						Value: "http://localhost:50051",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
@@ -57,12 +57,12 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -118,7 +118,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "minio-endpoint",
-						Value: "http://localhost:9000",
+						Value: "http://localhost:50051",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
@@ -128,12 +128,12 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -180,7 +180,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "minio-endpoint",
-						Value: "http://localhost:9000",
+						Value: "http://localhost:50051",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
@@ -190,12 +190,12 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
@@ -219,7 +219,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "minio-endpoint",
-						Value: "http://localhost:9000",
+						Value: "http://localhost:50051",
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
@@ -229,12 +229,12 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "access-key-id",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 access key",
 					},
 					&cli.StringFlag{
 						Name:  "secret-access-key",
-						Value: "minioadmin",
+						Value: "objstoreadmin",
 						Usage: "MinIO/AWS-S3 secret key",
 					},
 				},
