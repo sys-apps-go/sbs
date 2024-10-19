@@ -33,6 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/minio/minio-go/v7"
+
 	miniocredentials "github.com/minio/minio-go/v7/pkg/credentials"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -237,7 +238,7 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 			}
 			return nil
 		}
-	case "aws-s3":
+	case "remote", "aws-s3", "lts":
 		cleanRepoPath := strings.TrimPrefix(repoPath, "s3://")
 		parts := strings.SplitN(cleanRepoPath, "/", 2) // Now split into 2 parts: bucket and rest of the path
 		if len(parts) < 2 {
@@ -274,7 +275,10 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 		}
 
 		s.s3Client = s3.New(sess)
-	case "remote":
+		exists, err := s.verifyAndCreateS3Bucket(bucketName, region)
+		if !exists || err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -307,9 +311,8 @@ func (s *Sbs) initDataDir() error {
 		if err != nil {
 			return fmt.Errorf("failed to open file: %v", err)
 		}
-	case "aws-s3":
+	case "remote", "aws-s3", "lts":
 		// Skip for now
-	case "remote":
 	}
 	return nil
 }
@@ -464,7 +467,7 @@ func (s *Sbs) doBackup(srcDir string, snapMetaFile *string, backupMetaFile *stri
 
 func (s *Sbs) processFullBackup(srcDir, backupPath string, backupHiddenFiles bool) error {
 	switch s.storageType {
-	case "local", "minio", "aws-s3":
+	case "local", "minio", "aws-s3", "remote", "lts":
 		count := 0
 		dirMap := make(map[string]bool)
 		return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
@@ -526,8 +529,6 @@ func (s *Sbs) processFullBackup(srcDir, backupPath string, backupHiddenFiles boo
 			}
 			return nil
 		})
-	case "remote":
-		return fmt.Errorf("Storage type %s not implemented", s.storageType)
 	default:
 		return fmt.Errorf("Unknown storage type: %s", s.storageType)
 	}
@@ -1183,7 +1184,7 @@ func (s *Sbs) appendToSnapShotMetadataFile(snapMetaFile string, backupMeta strin
 	fileExists := true
 	err := s.checkFileExistsByStorage(snapMetaFile, false)
 	if err != nil {
-		if s.storageType != "aws-s3" {
+		if s.storageType != "aws-s3" && s.storageType != "lts" {
 			return err
 		}
 		fileExists = false
@@ -1272,7 +1273,7 @@ func (s *Sbs) addRecordInBackupListFile(sourceDirName string, version int, snaps
 	fileExists := true
 	err := s.checkFileExistsByStorage(s.backupListFilePath, false)
 	if err != nil {
-		if s.storageType != "aws-s3" {
+		if s.storageType != "aws-s3" && s.storageType != "lts" {
 			return err
 		}
 		fileExists = false
@@ -1561,8 +1562,8 @@ func (s *Sbs) removeDirByStorage(dirPath string) error {
 		if err := os.RemoveAll(dirPath); err != nil {
 			return fmt.Errorf("failed to remove local file or directory: %w", err)
 		}
-	case "remote":
-		return fmt.Errorf("remote file removal not implemented")
+	case "remote", "lts":
+		return s.removeDirAllS3(dirPath)
 	case "minio":
 		return s.removeDirAllMinio(dirPath)
 
@@ -1570,7 +1571,7 @@ func (s *Sbs) removeDirByStorage(dirPath string) error {
 		return s.removeDirAllS3(dirPath)
 
 	default:
-		return fmt.Errorf("unsupported target: %s", s.storageType)
+		return fmt.Errorf("Unsupported target: %s", s.storageType)
 	}
 	return nil
 }
@@ -1586,7 +1587,7 @@ func (s *Sbs) createDirMinioS3(dirPath string) error {
 			return fmt.Errorf("failed to create directory in MinIO: %w", err)
 		}
 
-	case "aws-s3":
+	case "aws-s3", "lts", "remote":
 		objectName := s.getPathBaseS3(dirPath, true)
 		// Use AWS S3 client to create a directory
 		_, err := s.s3Client.PutObject(&s3.PutObjectInput{
@@ -1599,7 +1600,7 @@ func (s *Sbs) createDirMinioS3(dirPath string) error {
 		}
 
 	default:
-		return fmt.Errorf("unknown storage type: %s", s.storageType)
+		return fmt.Errorf("Unknown storage type: %s", s.storageType)
 	}
 
 	return nil
@@ -1646,7 +1647,7 @@ func (s *Sbs) copyFileByStorage(localPath, remotePath string) error {
 			return fmt.Errorf("failed to upload file to MinIO: %w", err)
 		}
 
-	case "aws-s3":
+	case "aws-s3", "remote", "lts":
 		// Use AWS S3 client to upload file
 		objectName := s.getPathBaseS3(remotePath, false) // Get object key (remote path)
 		_, err = s.s3Client.PutObject(&s3.PutObjectInput{
@@ -1657,13 +1658,8 @@ func (s *Sbs) copyFileByStorage(localPath, remotePath string) error {
 		if err != nil {
 			return fmt.Errorf("failed to upload file to S3: %w", err)
 		}
-
-	case "remote":
-		// Placeholder for a remote copy process (e.g., via SSH, FTP, etc.)
-		return fmt.Errorf("remote file copy is not implemented")
-
 	default:
-		return fmt.Errorf("unknown storage type: %s", s.storageType)
+		return fmt.Errorf("Unknown storage type: %s", s.storageType)
 	}
 
 	return nil
@@ -1742,14 +1738,14 @@ func (s *Sbs) createDirByStorage(dirPath string, perm fs.FileMode) error {
 	switch s.storageType {
 	case "local":
 		return os.MkdirAll(dirPath, perm)
-	case "remote":
-		return fmt.Errorf("remote directory creation not implemented")
+	case "remote", "lts":
+		return s.createDirMinioS3(dirPath)
 	case "minio":
 		return s.createDirMinioS3(dirPath)
 	case "aws-s3":
 		return s.createDirMinioS3(dirPath)
 	default:
-		return fmt.Errorf("unsupported backend: %s", s.storageType)
+		return fmt.Errorf("Unsupported backend: %s", s.storageType)
 	}
 	return nil
 }
@@ -1773,7 +1769,7 @@ func (s *Sbs) writeFileByStorage(path string, data []byte, perm fs.FileMode) err
 			return fmt.Errorf("failed to upload file to MinIO: %v", err)
 		}
 
-	case "aws-s3":
+	case "aws-s3", "remote", "lts":
 		// Write file to AWS S3
 		objectName := s.getPathBaseS3(path, false)
 		dataReader := bytes.NewReader(data)
@@ -1789,7 +1785,7 @@ func (s *Sbs) writeFileByStorage(path string, data []byte, perm fs.FileMode) err
 		}
 
 	default:
-		return fmt.Errorf("unsupported backend: %s", s.storageType)
+		return fmt.Errorf("Unsupported backend: %s", s.storageType)
 	}
 
 	return nil
@@ -1803,10 +1799,6 @@ func (s *Sbs) openFileByStorage(path string) error {
 			return fmt.Errorf("failed to open file: %v", err)
 		}
 		defer file.Close()
-
-	case "remote":
-		return fmt.Errorf("Remote file system is not implemented")
-
 	case "minio":
 		objectName := s.getPathBase(path, false)
 		// Create or append a file in MinIO by uploading a nil reader
@@ -1817,7 +1809,7 @@ func (s *Sbs) openFileByStorage(path string) error {
 			return fmt.Errorf("failed to create or append file in MinIO: %v", err)
 		}
 
-	case "aws-s3":
+	case "aws-s3", "remote", "lts":
 		// Fetch the file from S3
 		objectName := s.getPathBaseS3(path, false)
 
@@ -1850,7 +1842,7 @@ func (s *Sbs) openFileByStorage(path string) error {
 		}
 
 	default:
-		return fmt.Errorf("unsupported storage type: %s", s.storageType)
+		return fmt.Errorf("Unsupported storage type: %s", s.storageType)
 	}
 	return nil
 }
@@ -1863,9 +1855,6 @@ func (s *Sbs) checkFileExistsByStorage(filePath string, isDirectory bool) error 
 			return fmt.Errorf("file not found: %v", filePath)
 		}
 
-	case "remote":
-		return fmt.Errorf("remote file system is not implemented")
-
 	case "minio":
 		objectName = s.getPathBase(filePath, isDirectory)
 		_, err := s.minioClient.StatObject(context.Background(), s.bucketName, objectName, minio.StatObjectOptions{})
@@ -1876,7 +1865,7 @@ func (s *Sbs) checkFileExistsByStorage(filePath string, isDirectory bool) error 
 			return fmt.Errorf("error checking file in MinIO: %v", err)
 		}
 
-	case "aws-s3":
+	case "aws-s3", "remote", "lts":
 		objectName = s.getPathBaseS3(filePath, isDirectory)
 		_, err := s.s3Client.HeadObject(&s3.HeadObjectInput{
 			Bucket: aws.String(s.bucketName),
@@ -1887,7 +1876,7 @@ func (s *Sbs) checkFileExistsByStorage(filePath string, isDirectory bool) error 
 		}
 
 	default:
-		return fmt.Errorf("unsupported storage type: %s", s.storageType)
+		return fmt.Errorf("Unsupported storage type: %s", s.storageType)
 	}
 
 	return nil
@@ -1901,9 +1890,6 @@ func (s *Sbs) readFileByStorage(filePath string) ([]byte, error) {
 			return nil, fmt.Errorf("failed to read file: %v %v", filePath, err)
 		}
 		return content, nil
-
-	case "remote":
-		return nil, fmt.Errorf("remote file system is not implemented")
 
 	case "minio":
 		objectName := s.getPathBase(filePath, false)
@@ -1919,7 +1905,7 @@ func (s *Sbs) readFileByStorage(filePath string) ([]byte, error) {
 		}
 		return content, nil
 
-	case "aws-s3":
+	case "aws-s3", "remote", "lts":
 		objectName := s.getPathBaseS3(filePath, false)
 		result, err := s.s3Client.GetObject(&s3.GetObjectInput{
 			Bucket: aws.String(s.bucketName),
@@ -1937,7 +1923,7 @@ func (s *Sbs) readFileByStorage(filePath string) ([]byte, error) {
 		return content, nil
 
 	default:
-		return nil, fmt.Errorf("unsupported storage type: %s", s.storageType)
+		return nil, fmt.Errorf("Unsupported storage type: %s", s.storageType)
 	}
 }
 
@@ -1958,7 +1944,7 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 		}
 		return true, fileInfo, nil
 
-	case "remote":
+	case "remote", "lts":
 		// Check if the backup directory exists in LTS
 		prefix := s.getPathBaseS3(path, true) // Use the prefix to check the directory
 		input := &s3.ListObjectsV2Input{
@@ -2021,7 +2007,7 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 		return false, nil, fmt.Errorf("AWS S3 directory does not exist: %v", path)
 
 	default:
-		return false, nil, fmt.Errorf("unsupported storage type: %s", s.storageType)
+		return false, nil, fmt.Errorf("Unsupported storage type: %s", s.storageType)
 	}
 }
 
@@ -2029,7 +2015,7 @@ func (s *Sbs) findBackupVersionsByStorage(dataDir string) (int, int, error) {
 	switch s.storageType {
 	case "local":
 		return findBackupVersions(dataDir)
-	case "remote":
+	case "remote", "lts":
 		return s.findBackupVersionsLTS(dataDir)
 	case "minio":
 		return s.findBackupVersionsMinio(dataDir)
@@ -2075,10 +2061,10 @@ func (s *Sbs) findBackupVersionsS3(dataDir string) (int, int, error) {
 	// Prepare to list objects in the bucket
 	objectName := s.getPathBaseS3(dataDir, true)
 	input := &s3.ListObjectsV2Input{
-		Bucket: aws.String(s.bucketName),
-		Prefix: aws.String(objectName),
+		Bucket:    aws.String(s.bucketName),
+		Prefix:    aws.String(objectName),
 		Delimiter: aws.String("/"),
-		MaxKeys: aws.Int64(1024),	
+		MaxKeys:   aws.Int64(1024),
 	}
 
 	// List objects
@@ -2092,7 +2078,7 @@ func (s *Sbs) findBackupVersionsS3(dataDir string) (int, int, error) {
 		// Get the object key
 		versionName := *obj.Prefix
 		if strings.HasSuffix(versionName, "/") {
-			versionName = versionName[0:len(versionName)-1]
+			versionName = versionName[0 : len(versionName)-1]
 		}
 		versionName = filepath.Base(versionName)
 		// Check if the object key starts with "V" followed by a number
@@ -2126,10 +2112,10 @@ func (s *Sbs) findBackupVersionsLTS(dataDir string) (int, int, error) {
 	// Prepare to list objects in the bucket
 	objectName := s.getPathBaseS3(dataDir, true)
 	input := &s3.ListObjectsV2Input{
-		Bucket: aws.String(s.bucketName),
-		Prefix: aws.String(objectName),
+		Bucket:    aws.String(s.bucketName),
+		Prefix:    aws.String(objectName),
 		Delimiter: aws.String("/"),
-		MaxKeys: aws.Int64(1024),	
+		MaxKeys:   aws.Int64(1024),
 	}
 
 	// List objects
@@ -2143,7 +2129,7 @@ func (s *Sbs) findBackupVersionsLTS(dataDir string) (int, int, error) {
 		// Get the object key
 		versionName := *obj.Prefix
 		if strings.HasSuffix(versionName, "/") {
-			versionName = versionName[0:len(versionName)-1]
+			versionName = versionName[0 : len(versionName)-1]
 		}
 		versionName = filepath.Base(versionName)
 		// Check if the object key starts with "V" followed by a number
@@ -2380,4 +2366,19 @@ func (s *Sbs) verifyAndCreateBucket(bucket, region string) error {
 		}
 	}
 	return nil
+}
+
+func (s *Sbs) verifyAndCreateS3Bucket(bucket, region string) (bool, error) {
+	_, err := s.s3Client.CreateBucket(&s3.CreateBucketInput{
+		Bucket: aws.String(bucket),
+		CreateBucketConfiguration: &s3.CreateBucketConfiguration{
+			LocationConstraint: aws.String(region),
+		},
+	})
+
+	if err != nil {
+		fmt.Printf("Error: Failed to create bucket: %v\n", err)
+		return false, fmt.Errorf("failed to create bucket: %w", err)
+	}
+	return true, nil
 }

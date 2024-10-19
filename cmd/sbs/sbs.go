@@ -47,7 +47,7 @@ func main() {
 					},
 					&cli.StringFlag{
 						Name:  "endpoint",
-						Value: "http://localhost:9000",
+						Value: "http://localhost:9000", 
 						Usage: "MinIO server endpoint",
 					},
 					&cli.StringFlag{
