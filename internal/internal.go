@@ -1588,12 +1588,6 @@ func (s *Sbs) removeDirByStorage(dirPath string) error {
 		}
 	case "aws-s3":
 		s.removeDirAllS3(dirPath)
-		time.Sleep(time.Second)
-		isDir, _, err := s.isDirExistsByStorage(dirPath)
-		if isDir && err == nil {
-			fmt.Printf("Please remove directory %v manually\n", dirPath)
-			os.Exit(1)
-		}
 
 	default:
 		return fmt.Errorf("Unsupported target: %s", s.storageType)
@@ -2021,7 +2015,7 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 		if err != nil {
 			return false, nil, fmt.Errorf("error listing objects in S3: %v", err)
 		}
-
+fmt.Println(*result.Prefix)
 		if len(*result.Prefix) > 0 {
 			// If we found at least one object with the given prefix, the directory exists
 			return true, nil, nil
