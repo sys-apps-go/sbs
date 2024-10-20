@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/awserr"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
@@ -1586,7 +1587,13 @@ func (s *Sbs) removeDirByStorage(dirPath string) error {
 			os.Exit(1)
 		}
 	case "aws-s3":
-		return s.removeDirAllS3(dirPath)
+		s.removeDirAllS3(dirPath)
+		time.Sleep(time.Second)
+		isDir, _, err := s.isDirExistsByStorage(dirPath)
+		if isDir && err == nil {
+			fmt.Printf("Please remove directory %v manually\n", dirPath)
+			os.Exit(1)
+		}
 
 	default:
 		return fmt.Errorf("Unsupported target: %s", s.storageType)
@@ -2386,7 +2393,25 @@ func (s *Sbs) verifyAndCreateMinioBucket(bucket, region string) (bool, error) {
 }
 
 func (s *Sbs) verifyAndCreateS3Bucket(bucket, region string) (bool, error) {
-	_, err := s.s3Client.CreateBucket(&s3.CreateBucketInput{
+	// Check if the bucket already exists
+	_, err := s.s3Client.HeadBucket(&s3.HeadBucketInput{
+		Bucket: aws.String(bucket),
+	})
+
+	if err == nil {
+		// Bucket already exists
+		fmt.Printf("Bucket %s already exists\n", bucket)
+		return true, nil
+	}
+
+	// If the error is not because the bucket doesn't exist, return the error
+	if aerr, ok := err.(awserr.Error); !ok || aerr.Code() != "NotFound" {
+		fmt.Printf("Error checking bucket existence: %v\n", err)
+		return false, fmt.Errorf("failed to check bucket existence: %w", err)
+	}
+
+	// Bucket doesn't exist, so create it
+	_, err = s.s3Client.CreateBucket(&s3.CreateBucketInput{
 		Bucket: aws.String(bucket),
 		CreateBucketConfiguration: &s3.CreateBucketConfiguration{
 			LocationConstraint: aws.String(region),
@@ -2397,5 +2422,7 @@ func (s *Sbs) verifyAndCreateS3Bucket(bucket, region string) (bool, error) {
 		fmt.Printf("Error: Failed to create bucket: %v\n", err)
 		return false, fmt.Errorf("failed to create bucket: %w", err)
 	}
+
+	fmt.Printf("Successfully created bucket %s\n", bucket)
 	return true, nil
 }
