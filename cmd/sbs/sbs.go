@@ -43,7 +43,7 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3/lts",
+						Usage:   "Storage type: local/remote/minio/s3/objstore",
 					},
 					&cli.StringFlag{
 						Name:  "endpoint",
@@ -109,7 +109,7 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3/lts",
+						Usage:   "Storage type: local/remote/minio/s3/objstore",
 					},
 					&cli.BoolFlag{
 						Name:    "v",
@@ -171,7 +171,7 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3/lts",
+						Usage:   "Storage type: local/remote/minio/s3/objstore",
 					},
 					&cli.BoolFlag{
 						Name:    "v",
@@ -215,7 +215,7 @@ func main() {
 						Name:    "t",
 						Aliases: []string{"type"},
 						Value:   "local",
-						Usage:   "Storage type: local/remote/minio/s3/lts",
+						Usage:   "Storage type: local/remote/minio/s3/objstore",
 					},
 					&cli.StringFlag{
 						Name:  "endpoint",
@@ -288,12 +288,6 @@ func runCommand(c *cli.Context, cmdFunc func(*internal.Sbs, context.Context) err
 			fmt.Printf("Recovered from panic: %v\n", r)
 			s.Cleanup()
 			fmt.Println(string(debug.Stack()))
-			pid := os.Getpid() // Get the current process ID
-			fmt.Printf("Waiting for debugger to attach (PID: %d)...\n", pid)
-
-			for {
-				time.Sleep(time.Second) // Wait for 1 second in each iteration
-			}
 		}
 	}()
 

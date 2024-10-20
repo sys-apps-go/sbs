@@ -232,13 +232,9 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 				return err
 			}
 			s.minioClient = minioClient
-			err = s.verifyAndCreateBucket(bucketName, region)
-			if err != nil {
-				return err
-			}
 			return nil
 		}
-	case "remote", "aws-s3", "lts":
+	case "remote", "aws-s3", "objstore":
 		cleanRepoPath := strings.TrimPrefix(repoPath, "s3://")
 		parts := strings.SplitN(cleanRepoPath, "/", 2) // Now split into 2 parts: bucket and rest of the path
 		if len(parts) < 2 {
@@ -275,15 +271,28 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 		}
 
 		s.s3Client = s3.New(sess)
-		exists, err := s.verifyAndCreateS3Bucket(bucketName, region)
-		if !exists || err != nil {
-			return err
-		}
+		return nil
 	}
 	return nil
 }
 
 func (s *Sbs) initDataDir() error {
+	if s.storageType == "minio" {
+		exists, err := s.verifyAndCreateMinioBucket(s.bucketName, s.region)
+		if !exists {
+			return fmt.Errorf("Bucket not existing, create failed")
+		} else if err != nil {
+			return err
+		}
+	} else if s.storageType == "aws-s3" || s.storageType == "objstore" {
+		exists, err := s.verifyAndCreateS3Bucket(s.bucketName, s.region)
+		if !exists {
+			return fmt.Errorf("Bucket not existing, create failed")
+		} else if err != nil {
+			return err
+		}
+	}
+
 	// Delete and Recreate Repopath Directory
 	fmt.Printf("Deleting directories under %v...\n", s.repoPath)
 	if err := s.removeDirByStorage(s.repoPath); err != nil {
@@ -311,7 +320,7 @@ func (s *Sbs) initDataDir() error {
 		if err != nil {
 			return fmt.Errorf("failed to open file: %v", err)
 		}
-	case "remote", "aws-s3", "lts":
+	case "remote", "aws-s3", "objstore":
 		// Skip for now
 	}
 	return nil
@@ -467,7 +476,7 @@ func (s *Sbs) doBackup(srcDir string, snapMetaFile *string, backupMetaFile *stri
 
 func (s *Sbs) processFullBackup(srcDir, backupPath string, backupHiddenFiles bool) error {
 	switch s.storageType {
-	case "local", "minio", "aws-s3", "remote", "lts":
+	case "local", "minio", "aws-s3", "remote", "objstore":
 		count := 0
 		dirMap := make(map[string]bool)
 		return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
@@ -1184,7 +1193,7 @@ func (s *Sbs) appendToSnapShotMetadataFile(snapMetaFile string, backupMeta strin
 	fileExists := true
 	err := s.checkFileExistsByStorage(snapMetaFile, false)
 	if err != nil {
-		if s.storageType != "aws-s3" && s.storageType != "lts" {
+		if s.storageType != "aws-s3" && s.storageType != "objstore" {
 			return err
 		}
 		fileExists = false
@@ -1273,7 +1282,7 @@ func (s *Sbs) addRecordInBackupListFile(sourceDirName string, version int, snaps
 	fileExists := true
 	err := s.checkFileExistsByStorage(s.backupListFilePath, false)
 	if err != nil {
-		if s.storageType != "aws-s3" && s.storageType != "lts" {
+		if s.storageType != "aws-s3" && s.storageType != "objstore" {
 			return err
 		}
 		fileExists = false
@@ -1562,11 +1571,20 @@ func (s *Sbs) removeDirByStorage(dirPath string) error {
 		if err := os.RemoveAll(dirPath); err != nil {
 			return fmt.Errorf("failed to remove local file or directory: %w", err)
 		}
-	case "remote", "lts":
-		return s.removeDirAllS3(dirPath)
-	case "minio":
-		return s.removeDirAllMinio(dirPath)
 
+	case "remote", "objstore":
+		return s.removeDirAllS3(dirPath)
+
+	case "minio":
+		cmd := exec.Command("mc", "rm", "--recursive", "--force", dirPath)
+		cmd.CombinedOutput()
+		s.removeDirAllMinio(dirPath) //Retry
+		time.Sleep(time.Second)
+		isDir, _, err := s.isDirExistsByStorage(dirPath)
+		if isDir && err == nil {
+			fmt.Printf("Please remove directory %v manually using mc command\n", dirPath)
+			os.Exit(1)
+		}
 	case "aws-s3":
 		return s.removeDirAllS3(dirPath)
 
@@ -1587,7 +1605,7 @@ func (s *Sbs) createDirMinioS3(dirPath string) error {
 			return fmt.Errorf("failed to create directory in MinIO: %w", err)
 		}
 
-	case "aws-s3", "lts", "remote":
+	case "aws-s3", "objstore", "remote":
 		objectName := s.getPathBaseS3(dirPath, true)
 		// Use AWS S3 client to create a directory
 		_, err := s.s3Client.PutObject(&s3.PutObjectInput{
@@ -1647,7 +1665,7 @@ func (s *Sbs) copyFileByStorage(localPath, remotePath string) error {
 			return fmt.Errorf("failed to upload file to MinIO: %w", err)
 		}
 
-	case "aws-s3", "remote", "lts":
+	case "aws-s3", "remote", "objstore":
 		// Use AWS S3 client to upload file
 		objectName := s.getPathBaseS3(remotePath, false) // Get object key (remote path)
 		_, err = s.s3Client.PutObject(&s3.PutObjectInput{
@@ -1668,7 +1686,6 @@ func (s *Sbs) copyFileByStorage(localPath, remotePath string) error {
 func (s *Sbs) removeDirAllMinio(dirPath string) error {
 	client := s.minioClient
 	objectName := s.getPathBase(dirPath, true)
-
 	objectCh := client.ListObjects(context.Background(), s.bucketName, minio.ListObjectsOptions{
 		Prefix:    objectName,
 		Recursive: true,
@@ -1691,7 +1708,6 @@ func (s *Sbs) removeDirAllMinio(dirPath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to remove directory %s: %w", objectName, err)
 	}
-
 	return nil
 }
 
@@ -1738,7 +1754,7 @@ func (s *Sbs) createDirByStorage(dirPath string, perm fs.FileMode) error {
 	switch s.storageType {
 	case "local":
 		return os.MkdirAll(dirPath, perm)
-	case "remote", "lts":
+	case "remote", "objstore":
 		return s.createDirMinioS3(dirPath)
 	case "minio":
 		return s.createDirMinioS3(dirPath)
@@ -1769,7 +1785,7 @@ func (s *Sbs) writeFileByStorage(path string, data []byte, perm fs.FileMode) err
 			return fmt.Errorf("failed to upload file to MinIO: %v", err)
 		}
 
-	case "aws-s3", "remote", "lts":
+	case "aws-s3", "remote", "objstore":
 		// Write file to AWS S3
 		objectName := s.getPathBaseS3(path, false)
 		dataReader := bytes.NewReader(data)
@@ -1809,7 +1825,7 @@ func (s *Sbs) openFileByStorage(path string) error {
 			return fmt.Errorf("failed to create or append file in MinIO: %v", err)
 		}
 
-	case "aws-s3", "remote", "lts":
+	case "aws-s3", "remote", "objstore":
 		// Fetch the file from S3
 		objectName := s.getPathBaseS3(path, false)
 
@@ -1865,7 +1881,7 @@ func (s *Sbs) checkFileExistsByStorage(filePath string, isDirectory bool) error 
 			return fmt.Errorf("error checking file in MinIO: %v", err)
 		}
 
-	case "aws-s3", "remote", "lts":
+	case "aws-s3", "remote", "objstore":
 		objectName = s.getPathBaseS3(filePath, isDirectory)
 		_, err := s.s3Client.HeadObject(&s3.HeadObjectInput{
 			Bucket: aws.String(s.bucketName),
@@ -1905,7 +1921,7 @@ func (s *Sbs) readFileByStorage(filePath string) ([]byte, error) {
 		}
 		return content, nil
 
-	case "aws-s3", "remote", "lts":
+	case "aws-s3", "remote", "objstore":
 		objectName := s.getPathBaseS3(filePath, false)
 		result, err := s.s3Client.GetObject(&s3.GetObjectInput{
 			Bucket: aws.String(s.bucketName),
@@ -1944,7 +1960,7 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 		}
 		return true, fileInfo, nil
 
-	case "remote", "lts":
+	case "remote", "objstore":
 		// Check if the backup directory exists in LTS
 		prefix := s.getPathBaseS3(path, true) // Use the prefix to check the directory
 		input := &s3.ListObjectsV2Input{
@@ -2015,7 +2031,7 @@ func (s *Sbs) findBackupVersionsByStorage(dataDir string) (int, int, error) {
 	switch s.storageType {
 	case "local":
 		return findBackupVersions(dataDir)
-	case "remote", "lts":
+	case "remote", "objstore":
 		return s.findBackupVersionsLTS(dataDir)
 	case "minio":
 		return s.findBackupVersionsMinio(dataDir)
@@ -2352,20 +2368,21 @@ func (s *Sbs) createFileS3(bucket, key string, content []byte) error {
 	return nil
 }
 
-func (s *Sbs) verifyAndCreateBucket(bucket, region string) error {
+func (s *Sbs) verifyAndCreateMinioBucket(bucket, region string) (bool, error) {
 	found, err := s.minioClient.BucketExists(context.Background(), bucket)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if found {
-		return nil
+		return true, nil
 	} else {
 		err = s.minioClient.MakeBucket(context.Background(), bucket, minio.MakeBucketOptions{Region: region, ObjectLocking: true})
 		if err != nil {
-			return err
+			return false, err
 		}
 	}
-	return nil
+	found, err = s.minioClient.BucketExists(context.Background(), bucket)
+	return found, err
 }
 
 func (s *Sbs) verifyAndCreateS3Bucket(bucket, region string) (bool, error) {
