@@ -523,7 +523,13 @@ func (s *Sbs) processFullBackup(srcDir, backupPath string, backupHiddenFiles boo
 					} else {
 						count++
 						if count%256 == 0 {
-							fmt.Printf(".")
+							if atomic.LoadUint32(&s.TaskAborted) == 1 {
+								fmt.Println("Aborting Backup Operations...")
+								s.Cleanup()
+								os.Exit(1)
+							} else {
+								fmt.Printf(".")
+							}
 						}
 						if err := s.createDirByStorage(dstPath, 0755); err != nil {
 							return err
@@ -598,7 +604,6 @@ func (s *Sbs) collectBackupJobs(srcDir, backupPath string, backupHiddenFiles boo
 		if atomic.LoadUint32(&s.TaskAborted) == 1 {
 			fmt.Println("Aborting Backup Operations...")
 			s.Cleanup()
-			atomic.StoreUint32(&s.TaskExited, 1)
 			os.Exit(1)
 		}
 		return nil
@@ -876,7 +881,13 @@ func (s *Sbs) processAndStoreFile(srcPath, dstPath, relPath string, info os.File
 	} else {
 		s.backupFileCount++
 		if s.backupFileCount%32 == 0 {
-			fmt.Printf(".")
+			if atomic.LoadUint32(&s.TaskAborted) == 1 {
+				fmt.Println("Aborting Backup Operations...")
+				s.Cleanup()
+				os.Exit(1)
+			} else {
+				fmt.Printf(".")
+			}
 		}
 	}
 	return nil
@@ -1049,7 +1060,7 @@ func (s *Sbs) restoreFiles(records []BackupRecord, rootDir, dataOptimization str
 		if atomic.LoadUint32(&s.TaskAborted) == 1 {
 			fmt.Println("Aborting Restore Operations...")
 			s.Cleanup()
-			atomic.StoreUint32(&s.TaskExited, 1)
+			os.Exit(1)
 		}
 	}
 
@@ -1406,6 +1417,9 @@ func findBackupVersions(dataDir string) (int, int, error) {
 }
 
 func (s *Sbs) Cleanup() error {
+	s.fileMu.Lock()
+	defer s.fileMu.Unlock()
+
 	switch s.currentStatus {
 	case statusInit:
 		fmt.Printf("Deleting files/directories under %v...\n", s.repoPath)
@@ -2015,7 +2029,7 @@ func (s *Sbs) isDirExistsByStorage(path string) (bool, os.FileInfo, error) {
 		if err != nil {
 			return false, nil, fmt.Errorf("error listing objects in S3: %v", err)
 		}
-fmt.Println(*result.Prefix)
+		fmt.Println(*result.Prefix)
 		if len(*result.Prefix) > 0 {
 			// If we found at least one object with the given prefix, the directory exists
 			return true, nil, nil
