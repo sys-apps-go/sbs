@@ -210,6 +210,9 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 
 	switch storageType {
 	case "local", "minio":
+		if !strings.HasSuffix(repoPath, "/") {
+			repoPath += "/"
+		}
 		s.repoPath = repoPath
 		s.backupDataDir = filepath.Join(repoPath, backupDirName)               //backup dir
 		s.metadataDir = filepath.Join(repoPath, metadataDirName)               //metadata dir
@@ -247,6 +250,9 @@ func (s *Sbs) InitializeData(repoPathInput string, storageType string, accessKey
 		repoPath := strings.TrimPrefix(cleanRepoPath, bucketName)
 		if strings.HasPrefix(repoPath, "/") {
 			repoPath = repoPath[1:]
+		}
+		if !strings.HasSuffix(repoPath, "/") {
+			repoPath += "/"
 		}
 		s.repoPath = repoPath
 		s.passwordFilePath = filepath.Join(repoPath, "password.enc")
@@ -295,7 +301,7 @@ func (s *Sbs) initDataDir() error {
 	}
 
 	// Delete and Recreate Repopath Directory
-	fmt.Printf("Deleting directories under %v...\n", s.repoPath)
+	fmt.Printf("Deleting directories under %v\n", s.repoPath)
 	if err := s.removeDirByStorage(s.repoPath); err != nil {
 		return fmt.Errorf("failed to remove repository directory: %v", err)
 	}
@@ -397,41 +403,37 @@ func (s *Sbs) doBackup(srcDir string, snapMetaFile *string, backupMetaFile *stri
 	rootPathDstDir := filepath.Join(s.backupDataDir, dirNameHashed)
 	incrementalBackup := false
 
-	var prevBkpMetaFile string
-	isDir, _, err = s.isDirExistsByStorage(rootPathDstDir)
+	currentVersion, newVersion, err := s.getCurrentAndNextBackupVersions(srcDir)
 	if err != nil {
-		// Initialize new backup
-		bkpVersionDir = "V0"
-		backupPath = filepath.Join(rootPathDstDir, bkpVersionDir)
+		newVersion = 0
+		currentVersion = 0
+	}
+	
+	bkpVersionDir = fmt.Sprintf("%v%v", "V", newVersion)
+	backupPath = filepath.Join(rootPathDstDir, bkpVersionDir)
+	*version = newVersion
+	if newVersion == 0 {
+		isDir, _, err = s.isDirExistsByStorage(rootPathDstDir)
+		if err == nil {
+			s.removeDirByStorage(rootPathDstDir)
+		}
 		if err := s.createDirByStorage(backupPath, 0755); err != nil {
 			return false, err
 		}
-		*version = 0
 	} else {
-		if !isDir {
-			// Recreate backup directory if it's not a directory
-			s.removeDirByStorage(rootPathDstDir)
-			bkpVersionDir = "V0"
-			backupPath = filepath.Join(rootPathDstDir, bkpVersionDir)
-			s.createDirByStorage(backupPath, 0755)
-			*version = 0
-		} else {
-			// Find previous and current backup versions
-			prevVer, currVer, err := s.findBackupVersionsByStorage(rootPathDstDir)
-			if err != nil {
-				return false, err
-			}
-			bkpVersionDir = fmt.Sprintf("V%v", currVer)
-			backupPath = filepath.Join(rootPathDstDir, bkpVersionDir)
-			s.createDirByStorage(backupPath, 0755)
-			if currVer > 0 {
-				incrementalBackup = true
-			}
-			*version = currVer
-			prevBkpVersionDir := fmt.Sprintf("V%v", prevVer)
-			prevBkpMetaFile = filepath.Join(rootPathDstDir, prevBkpVersionDir, backupMeta)
+		isDir, _, err = s.isDirExistsByStorage(rootPathDstDir)
+		if err != nil || !isDir {
+			return false, fmt.Errorf("Invalid directory: %v", err)
 		}
 	}
+
+	s.createDirByStorage(backupPath, 0755)
+	if newVersion > 0 {
+		incrementalBackup = true
+	}
+
+	prevBkpVersionDir := fmt.Sprintf("V%v", currentVersion)
+	prevBkpMetaFile := filepath.Join(rootPathDstDir, prevBkpVersionDir, backupMeta)
 
 	// Set up metadata files
 	s.currBackupDstDir = backupPath
@@ -1158,6 +1160,40 @@ func (s *Sbs) listBackupRecords() error {
 	return nil
 }
 
+func (s *Sbs) getCurrentAndNextBackupVersions(sourceDirName string) (int, int, error) {
+	encryptedData, err := s.readFileByStorage(s.backupListFilePath)
+	if err != nil {
+		return 0, 0, fmt.Errorf("Error reading file: %w", err)
+	}
+
+	if len(encryptedData) == 0 {
+		return 0, 0, fmt.Errorf("Corrupted or incomplete metadata file")
+	}
+
+	// Decrypt the snapshot content
+	decryptedData, err := decrypt(string(encryptedData))
+	if err != nil {
+		return 0, 0, fmt.Errorf("Failed to decrypt snapshot file: %w", err)
+	}
+
+	var records []BackupListRecord
+	err = json.Unmarshal([]byte(decryptedData), &records)
+	if err != nil {
+		return 0, 0, fmt.Errorf("failed to unmarshal snapshot content: %w", err)
+	}
+
+	currentVersion := -1
+	for _, record := range records {
+		if record.SourceDirName == sourceDirName && record.Version > currentVersion {
+			currentVersion = record.Version
+		}
+	}
+
+	nextVersion := currentVersion + 1
+
+	return currentVersion, nextVersion, nil
+}
+
 func (s *Sbs) readPassword(prompt string) (string, error) {
 	fmt.Print(prompt)
 	password, err := terminal.ReadPassword(int(os.Stdin.Fd()))
@@ -1439,7 +1475,11 @@ func (s *Sbs) Cleanup() error {
 		}
 		isDir, _, err := s.isDirExistsByStorage(s.currBackupDstDir)
 		if err == nil && isDir {
-			fmt.Printf("\nPlease remove backup version directory manually if not already removed: %v\n", s.currBackupDstDir)
+			removeDirectoryWithMC(s.currBackupDstDir)
+			isDir, _, err = s.isDirExistsByStorage(s.currBackupDstDir)
+			if err == nil && isDir {
+				fmt.Printf("\nPlease remove backup version directory manually if not already removed: %v\n", s.currBackupDstDir)
+			}
 		}
 	case statusRestore:
 		os.RemoveAll(s.currRestoreDstDir)
@@ -1581,6 +1621,9 @@ func getMinioClient(accessKeyID, secretAccessKey, endpoint string) (*minio.Clien
 }
 
 func (s *Sbs) removeDirByStorage(dirPath string) error {
+	if !strings.HasSuffix(dirPath, "/") {
+		dirPath += "/"
+	}
 	switch s.storageType {
 	case "local":
 		if err := os.RemoveAll(dirPath); err != nil {
